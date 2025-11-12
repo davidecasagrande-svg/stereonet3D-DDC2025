@@ -138,7 +138,7 @@ let compass;
 const HIGHLIGHT_OPACITY = 0.95;  // halo opacity
 const NORMAL_OPACITY    = 0.35;  // ring opacity (default)
 const FADE_OPACITY      = 0.10;  // ring opacity (others when one selected)
-let selected = -1;
+let selected = -1;               // ✅ only declared once
 
 const container = document.getElementById('webgl');
 init();
@@ -307,7 +307,6 @@ function poleVector(dipDirDeg, dipDeg){
 /* ------------------- Picking / highlight ------------------- */
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
-let selected = -1;
 
 function onPick(ev){
   const rect = renderer.domElement.getBoundingClientRect();
