@@ -9,10 +9,10 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/renderers/CSS2DRenderer.js"></script>
   <style>
-    :root { --bg:#0f172a; --panel:#111827; --muted:#9ca3af; --border:#1f2937; --accent:#60a5fa; }
-    html,body{height:100%;margin:0;background:var(--bg);color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial;}
+    :root { --bg:#0f172a; --panel:#111827; --muted:#6b7280; --border:#1f2937; }
+    html,body{height:100%;margin:0;background:#ffffff;color:#111;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial;}
     .wrap{display:grid;grid-template-columns:340px 1fr;height:100%;}
-    .panel{background:var(--panel);padding:14px;border-right:1px solid var(--border);overflow:auto}
+    .panel{background:var(--panel);color:#fff;padding:14px;border-right:1px solid var(--border);overflow:auto}
     h1{font-size:18px;margin:4px 0 12px}
     .muted{color:var(--muted)}
     table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
@@ -22,13 +22,13 @@
     input[type="color"]{width:36px;height:28px;border:none;background:transparent}
     button{background:#1d4ed8;color:#fff;border:none;border-radius:8px;padding:8px 10px;font-weight:600;cursor:pointer}
     button.secondary{background:#334155}
-    button.ghost{background:transparent;border:1px solid var(--border)}
+    button.ghost{background:transparent;border:1px solid var(--border);color:#e5e7eb}
     .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
     .inline{display:flex;gap:8px;align-items:center;margin-top:6px}
     #canvasWrap{position:relative}
     #webgl{display:block;width:100%;height:100%}
     .label{color:#fff;font-size:14px;padding:2px 6px;background:rgba(0,0,0,.55);border-radius:6px;pointer-events:none}
-    .legend{margin-top:8px;border:1px solid var(--border);border-radius:10px;padding:8px}
+    .legend{margin-top:8px;border:1px solid var(--border);border-radius:10px;padding:8px;color:#e5e7eb}
     .legend-item{display:flex;align-items:center;gap:8px;margin:4px 0}
     .swatch{width:14px;height:14px;border-radius:3px;border:1px solid #0003}
     .small{font-size:12px}
@@ -42,7 +42,7 @@
 <div class="wrap">
   <aside class="panel">
     <h1>3D Plane & Pole Viewer</h1>
-    <div class="muted small">Enter Dip (°) and Dip Direction (°). Add as many rows as you need. Plot draws <b>all</b> poles together. Click a pole to highlight/solo its plane.</div>
+    <div class="muted small">Enter Dip (°) and Dip Direction (°). Add as many rows as you need. Plot draws <b>all</b> poles together. Click a pole to highlight or solo its plane.</div>
 
     <div class="btnrow">
       <button id="addRowBtn">+ Add Plane</button>
@@ -64,11 +64,11 @@
     </table>
 
     <div class="legend" id="legendBox">
-      <div class="small muted">Legend</div>
+      <div class="small muted" style="color:#9ca3af">Legend</div>
       <div id="legendItems"></div>
     </div>
 
-    <div class="small muted" style="margin-top:8px">
+    <div class="small muted" style="margin-top:8px;color:#9ca3af">
       Axes: X=East, Y=North, Z=Up. N/E/S/W labels are fixed in world space and rotate with the sphere.
     </div>
   </aside>
@@ -79,8 +79,8 @@
 </div>
 
 <script>
-/* =============== UI state =============== */
-const RADIUS = 100; // sphere radius
+/* ------------------- UI state ------------------- */
+const RADIUS = 100;
 const tbody = document.getElementById('tbody');
 const legendItems = document.getElementById('legendItems');
 const addRowBtn = document.getElementById('addRowBtn');
@@ -91,12 +91,11 @@ const soloToggle = document.getElementById('soloToggle');
 const gridToggle = document.getElementById('gridToggle');
 
 /* seed 3 example rows */
-const seed = [
+[
   {label:'ID_1', dip:60, dipDir:340, color:'#ff3b30'},
   {label:'ID_2', dip:75, dipDir:240, color:'#34c759'},
   {label:'ID_3', dip:85, dipDir:200, color:'#0a84ff'},
-];
-seed.forEach(addRow);
+].forEach(addRow);
 if (tbody.children.length===0) addRow();
 
 addRowBtn.onclick = () => addRow();
@@ -131,10 +130,15 @@ function readRows(){
   return rows;
 }
 
-/* =============== Three.js setup =============== */
+/* ------------------- Three.js setup ------------------- */
 let scene, camera, renderer, controls, labelRenderer, wire;
-let poles=[], planes=[], poleGroup, planeGroup, clickables=[];
+let poles=[], planes=[], rings=[], poleGroup, planeGroup, clickables=[];
 let compass;
+
+const HIGHLIGHT_OPACITY = 0.95;  // selected plane
+const NORMAL_OPACITY    = 0.15;  // default planes
+const FADE_OPACITY      = 0.06;  // non-selected while highlighting
+let selected = -1;
 
 const container = document.getElementById('webgl');
 init();
@@ -142,7 +146,7 @@ buildSceneFromTable();
 
 function init(){
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0f172a);
+  scene.background = new THREE.Color(0xffffff); // white canvas
 
   const w = container.clientWidth || window.innerWidth-340;
   const h = window.innerHeight;
@@ -157,7 +161,7 @@ function init(){
   labelRenderer.setSize(w,h);
   labelRenderer.domElement.style.position='absolute';
   labelRenderer.domElement.style.top='0';
-  labelRenderer.domElement.className = 'label-layer';   // ← add this line
+  labelRenderer.domElement.className = 'label-layer';
   container.appendChild(labelRenderer.domElement);
 
   controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -168,9 +172,9 @@ function init(){
 
   // lights
   scene.add(new THREE.AmbientLight(0xffffff, 0.9));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-  dir.position.set(200,200,200);
-  scene.add(dir);
+  const dLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dLight.position.set(200,200,200);
+  scene.add(dLight);
 
   // world axes helper
   const axes = new THREE.AxesHelper(RADIUS*1.2); // X=E (red), Y=N (green), Z=Up (blue)
@@ -191,10 +195,10 @@ function init(){
   mkLbl('W', new THREE.Vector3(-RADIUS*1.05, 0, 0));
   scene.add(compass);
 
-  // wireframe sphere (grid cue)
+  // wireframe sphere (grid cue) – light grey on white
   const sph = new THREE.SphereGeometry(RADIUS, 24, 18);
-  const mat = new THREE.MeshBasicMaterial({color:0x334155, wireframe:true, transparent:true, opacity:0.8});
-  wire = new THREE.Mesh(sph, mat);
+  const wireMat = new THREE.MeshBasicMaterial({color:0xcbd5e1, wireframe:true, transparent:true, opacity:0.55});
+  wire = new THREE.Mesh(sph, wireMat);
   scene.add(wire);
 
   // groups
@@ -225,12 +229,13 @@ function animate(){
   labelRenderer.render(scene, camera);
 }
 
-/* =============== Build scene from table =============== */
+/* ------------------- Build scene from table ------------------- */
 function buildSceneFromTable(){
   // clear old
   poles.forEach(m=>poleGroup.remove(m));
   planes.forEach(m=>planeGroup.remove(m));
-  poles=[]; planes=[]; clickables=[];
+  rings.forEach(m=>planeGroup.remove(m));
+  poles=[]; planes=[]; rings=[]; clickables=[];
   legendItems.innerHTML='';
 
   const rows = readRows();
@@ -238,7 +243,7 @@ function buildSceneFromTable(){
 
   rows.forEach((r,idx)=>{
     const color = new THREE.Color(r.color);
-    // Pole vector from Dip/DipDir (x=E, y=N, z=Up; pole points downwards for lower hemisphere)
+    // Pole vector (x=E, y=N, z=Up; lower hemisphere)
     const v = poleVector(r.dipDir, r.dip).normalize().multiplyScalar(RADIUS);
 
     // pole mesh
@@ -255,7 +260,7 @@ function buildSceneFromTable(){
     // plane (thin disk) perpendicular to pole (passes through origin)
     const plane = new THREE.Mesh(
       new THREE.CylinderGeometry(RADIUS, RADIUS, 0.8, 96, 1, true),
-      new THREE.MeshBasicMaterial({color: color, transparent:true, opacity:0.18, side:THREE.DoubleSide})
+      new THREE.MeshBasicMaterial({color: color, transparent:true, opacity:NORMAL_OPACITY, side:THREE.DoubleSide})
     );
     // orient using quaternion: reference normal (0,0,1) -> pole direction
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1), v.clone().normalize());
@@ -263,12 +268,21 @@ function buildSceneFromTable(){
     planeGroup.add(plane);
     planes.push(plane);
 
+    // outline ring (great circle) for highlight
+    const ringGeo = new THREE.RingGeometry(RADIUS-0.6, RADIUS+0.6, 128);
+    const ringMat = new THREE.MeshBasicMaterial({color: color, side: THREE.DoubleSide, transparent:true, opacity:0.9});
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.quaternion.copy(q);
+    ring.visible = false; // only on selection
+    planeGroup.add(ring);
+    rings.push(ring);
+
     // legend
     const item = document.createElement('div');
     item.className='legend-item';
     item.innerHTML = `<span class="swatch" style="background:${r.color}"></span>
       <span>${r.label}</span>
-      <span class="muted small">— Dip ${r.dip.toFixed(1)}°, DipDir ${r.dipDir.toFixed(1)}°</span>`;
+      <span class="muted small" style="color:#cbd5e1">— Dip ${r.dip.toFixed(1)}°, DipDir ${r.dipDir.toFixed(1)}°</span>`;
     legendItems.appendChild(item);
   });
 
@@ -288,10 +302,9 @@ function poleVector(dipDirDeg, dipDeg){
   return v;
 }
 
-/* =============== Picking / highlight =============== */
+/* ------------------- Picking / highlight ------------------- */
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
-let selected = -1;
 
 function onPick(ev){
   const rect = renderer.domElement.getBoundingClientRect();
@@ -301,42 +314,39 @@ function onPick(ev){
   const hits = raycaster.intersectObjects(clickables, false);
   if (hits.length){
     const idx = hits[0].object.userData.index;
-    if (soloToggle.checked){
-      solo(idx);
-    } else {
-      highlight(idx);
-    }
+    if (soloToggle.checked){ solo(idx); }
+    else { highlight(idx); }
   } else {
-    // click empty space -> clear highlight / un-solo
-    clearHighlight(true);
+    clearHighlight(true); // click empty space -> reset
   }
 }
 
 function highlight(idx){
   selected = idx;
   planes.forEach((pl,i)=>{
-    pl.material.opacity = (i===idx)? 0.75 : 0.12;
+    pl.material.opacity = (i===idx)? HIGHLIGHT_OPACITY : FADE_OPACITY;
     pl.material.needsUpdate = true;
   });
-  poles.forEach((po,i)=>{
-    po.scale.setScalar(i===idx? 1.3 : 1.0);
-  });
+  rings.forEach((ln,i)=> ln.visible = (i===idx)); // outline only on selected
+  poles.forEach((po,i)=> po.scale.setScalar(i===idx? 1.6 : 1.0));
 }
 
 function clearHighlight(resetSolo=false){
   selected = -1;
-  planes.forEach(pl=>{ pl.visible = true; pl.material.opacity = 0.18; });
-  poles.forEach(po=>{ po.visible = true; po.scale.setScalar(1.0); });
+  planes.forEach(pl=>{ pl.visible = true; pl.material.opacity = NORMAL_OPACITY; });
+  rings.forEach(ln=> ln.visible = false);
+  poles.forEach(po=> po.scale.setScalar(1.0));
   if (resetSolo) soloToggle.checked = false;
 }
 
 function solo(idx){
   selected = idx;
   planes.forEach((pl,i)=> pl.visible = (i===idx));
+  rings.forEach((ln,i)=> ln.visible = (i===idx));
   poles.forEach((po,i)=> po.visible = (i===idx));
 }
 
-/* =============== Utilities =============== */
+/* ------------------- Utilities ------------------- */
 function resetView(){
   controls.reset();
   camera.position.set(0,0,RADIUS*3);
@@ -352,4 +362,3 @@ function downloadPNG(){
 </script>
 </body>
 </html>
-
