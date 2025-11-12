@@ -4,10 +4,12 @@
   <meta charset="utf-8" />
   <title>3D Plane & Pole Viewer (Dip / Dip Direction)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Three.js r128 + examples from UNPKG (stable for examples) -->
+
+  <!-- Three.js r128 + examples from UNPKG (more reliable for examples) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://unpkg.com/three@0.128.0/examples/js/renderers/CSS2DRenderer.js"></script>
+
   <style>
     :root { --panel:#111827; --muted:#6b7280; --border:#1f2937; }
     html,body{height:100%;margin:0;background:#ffffff;color:#111;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial;overflow:hidden}
@@ -118,9 +120,9 @@ function readRows(){
 
 /* ---------- Three.js ---------- */
 let scene,camera,renderer,controls,labelRenderer,wire;
-let poles=[],planes=[],halos=[],poleGroup,planeGroup,clickables=[];
+let poles=[],rings=[],fills=[],poleGroup,planeGroup,clickables=[];
 let compass;
-const HIGHLIGHT_OPACITY=0.95, NORMAL_OPACITY=0.35, FADE_OPACITY=0.10;
+const HIGHLIGHT_RING=0.9, NORMAL_RING=0.35, FADE_RING=0.10, FILL_ALPHA=0.25;
 let selected=-1;
 
 const container=document.getElementById('webgl');
@@ -185,10 +187,9 @@ function animate(){ requestAnimationFrame(animate); controls.update();
 
 /* ---------- Build scene ---------- */
 function buildSceneFromTable(){
-  poles.forEach(m=>poleGroup.remove(m));
-  planes.forEach(m=>planeGroup.remove(m));
-  halos.forEach(m=>planeGroup.remove(m));
-  poles=[]; planes=[]; halos=[]; clickables=[]; legendItems.innerHTML='';
+  // clear old
+  poleGroup.clear(); planeGroup.clear();
+  poles=[]; rings=[]; fills=[]; clickables=[]; legendItems.innerHTML='';
 
   const rows=readRows(); if(!rows.length) return;
 
@@ -206,18 +207,22 @@ function buildSceneFromTable(){
 
     const q=new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1), v.clone().normalize());
 
+    // Great-circle ring (always visible)
     const ring=new THREE.Mesh(
       new THREE.RingGeometry(RADIUS-0.3,RADIUS+0.3,256),
-      new THREE.MeshBasicMaterial({color,transparent:true,opacity:NORMAL_OPACITY,side:THREE.DoubleSide})
+      new THREE.MeshBasicMaterial({color,transparent:true,opacity:NORMAL_RING,side:THREE.DoubleSide})
     );
-    ring.quaternion.copy(q); planeGroup.add(ring); planes.push(ring);
+    ring.quaternion.copy(q); planeGroup.add(ring); rings.push(ring);
 
-    const halo=new THREE.Mesh(
-      new THREE.RingGeometry(RADIUS-1.2,RADIUS+1.2,256),
-      new THREE.MeshBasicMaterial({color,transparent:true,opacity:HIGHLIGHT_OPACITY,side:THREE.DoubleSide})
+    // Filled plane (hidden until selected)
+    const fill=new THREE.Mesh(
+      new THREE.PlaneGeometry(RADIUS*2.2, RADIUS*2.2, 1, 1),
+      new THREE.MeshStandardMaterial({color,transparent:true,opacity:FILL_ALPHA,side:THREE.DoubleSide})
     );
-    halo.quaternion.copy(q); halo.visible=false; planeGroup.add(halo); halos.push(halo);
+    fill.quaternion.copy(q); fill.visible=false;
+    planeGroup.add(fill); fills.push(fill);
 
+    // legend
     const item=document.createElement('div');
     item.className='legend-item';
     item.innerHTML=`<span class="swatch" style="background:${r.color}"></span>
@@ -246,23 +251,27 @@ function onPick(ev){
     if(soloToggle.checked) solo(idx); else highlight(idx);
   } else clearHighlight(true);
 }
+
 function highlight(idx){
   selected=idx;
-  planes.forEach((ring,i)=>{ ring.material.opacity=(i===idx)? NORMAL_OPACITY:FADE_OPACITY; ring.material.needsUpdate=true; });
-  halos.forEach((h,i)=> h.visible=(i===idx));
-  poles.forEach((p,i)=> p.scale.setScalar(i===idx?1.6:1.0));
+  rings.forEach((ring,i)=>{
+    ring.material.opacity = (i===idx)? NORMAL_RING : FADE_RING;
+    ring.material.needsUpdate = true;
+  });
+  fills.forEach((pl,i)=> pl.visible = (i===idx));         // show filled plane only for selected
+  poles.forEach((p,i)=> { p.scale.setScalar(i===idx?1.6:1.0); p.visible = true; });
 }
 function clearHighlight(resetSolo=false){
   selected=-1;
-  planes.forEach(r=>{ r.visible=true; r.material.opacity=NORMAL_OPACITY; });
-  halos.forEach(h=> h.visible=false);
-  poles.forEach(p=> p.scale.setScalar(1.0));
+  rings.forEach(r=>{ r.visible=true; r.material.opacity=NORMAL_RING; });
+  fills.forEach(f=> f.visible=false);
+  poles.forEach(p=> { p.scale.setScalar(1.0); p.visible=true; });
   if(resetSolo) soloToggle.checked=false;
 }
 function solo(idx){
   selected=idx;
-  planes.forEach((r,i)=> r.visible=(i===idx));
-  halos.forEach((h,i)=> h.visible=(i===idx));
+  rings.forEach((r,i)=> r.visible=(i===idx));
+  fills.forEach((f,i)=> f.visible=(i===idx));
   poles.forEach((p,i)=> p.visible=(i===idx));
 }
 
