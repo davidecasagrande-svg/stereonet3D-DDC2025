@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>3D Plane & Pole Viewer (Dip / Dip Direction)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- CDN: Three.js r128 + OrbitControls + CSS2DRenderer -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/renderers/CSS2DRenderer.js"></script>
+  <style>
+    :root { --bg:#0f172a; --panel:#111827; --muted:#9ca3af; --border:#1f2937; --accent:#60a5fa; }
+    html,body{height:100%;margin:0;background:var(--bg);color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial;}
+    .wrap{display:grid;grid-template-columns:340px 1fr;height:100%;}
+    .panel{background:var(--panel);padding:14px;border-right:1px solid var(--border);overflow:auto}
+    h1{font-size:18px;margin:4px 0 12px}
+    .muted{color:var(--muted)}
+    table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
+    th,td{border-bottom:1px solid var(--border);padding:6px 4px;text-align:left}
+    input[type="number"]{width:72px;background:#0b1220;color:#fff;border:1px solid var(--border);border-radius:6px;padding:4px 6px}
+    input[type="text"]{width:80px;background:#0b1220;color:#fff;border:1px solid var(--border);border-radius:6px;padding:4px 6px}
+    input[type="color"]{width:36px;height:28px;border:none;background:transparent}
+    button{background:#1d4ed8;color:#fff;border:none;border-radius:8px;padding:8px 10px;font-weight:600;cursor:pointer}
+    button.secondary{background:#334155}
+    button.ghost{background:transparent;border:1px solid var(--border)}
+    .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+    .inline{display:flex;gap:8px;align-items:center;margin-top:6px}
+    #canvasWrap{position:relative}
+    #webgl{display:block;width:100%;height:100%}
+    .label{color:#fff;font-size:14px;padding:2px 6px;background:rgba(0,0,0,.55);border-radius:6px;pointer-events:none}
+    .legend{margin-top:8px;border:1px solid var(--border);border-radius:10px;padding:8px}
+    .legend-item{display:flex;align-items:center;gap:8px;margin:4px 0}
+    .swatch{width:14px;height:14px;border-radius:3px;border:1px solid #0003}
+    .small{font-size:12px}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <aside class="panel">
+    <h1>3D Plane & Pole Viewer</h1>
+    <div class="muted small">Enter Dip (°) and Dip Direction (°). Add as many rows as you need. Plot draws <b>all</b> poles together. Click a pole to highlight/solo its plane.</div>
+
+    <div class="btnrow">
+      <button id="addRowBtn">+ Add Plane</button>
+      <button id="plotBtn">Plot / Update</button>
+      <button id="resetBtn" class="secondary">Reset View</button>
+      <button id="downloadBtn" class="ghost">Download PNG</button>
+    </div>
+
+    <div class="inline small">
+      <label><input type="checkbox" id="soloToggle"> Solo selected plane on click</label>
+      <label><input type="checkbox" id="gridToggle" checked> Show wireframe sphere</label>
+    </div>
+
+    <table id="planesTable">
+      <thead>
+        <tr><th>Label</th><th>Dip</th><th>Dip Dir</th><th>Colour</th><th></th></tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+
+    <div class="legend" id="legendBox">
+      <div class="small muted">Legend</div>
+      <div id="legendItems"></div>
+    </div>
+
+    <div class="small muted" style="margin-top:8px">
+      Axes: X=East, Y=North, Z=Up. N/E/S/W labels are fixed in world space and rotate with the sphere.
+    </div>
+  </aside>
+
+  <section id="canvasWrap">
+    <div id="webgl"></div>
+  </section>
+</div>
+
+<script>
+/* =============== UI state =============== */
+const RADIUS = 100; // sphere radius
+const tbody = document.getElementById('tbody');
+const legendItems = document.getElementById('legendItems');
+const addRowBtn = document.getElementById('addRowBtn');
+const plotBtn = document.getElementById('plotBtn');
+const resetBtn = document.getElementById('resetBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+const soloToggle = document.getElementById('soloToggle');
+const gridToggle = document.getElementById('gridToggle');
+
+/* seed 3 example rows */
+const seed = [
+  {label:'ID_1', dip:60, dipDir:340, color:'#ff3b30'},
+  {label:'ID_2', dip:75, dipDir:240, color:'#34c759'},
+  {label:'ID_3', dip:85, dipDir:200, color:'#0a84ff'},
+];
+seed.forEach(addRow);
+if (tbody.children.length===0) addRow();
+
+addRowBtn.onclick = () => addRow();
+plotBtn.onclick = () => buildSceneFromTable();
+resetBtn.onclick = () => resetView();
+downloadBtn.onclick = () => downloadPNG();
+gridToggle.onchange = () => { if (wire) wire.visible = gridToggle.checked; };
+
+/* add one table row */
+function addRow(row={label:'ID_'+(tbody.children.length+1), dip:'', dipDir:'', color:'#ff6b00'}) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="text" value="${row.label}"></td>
+    <td><input type="number" min="0" max="90" step="0.1" value="${row.dip}"></td>
+    <td><input type="number" min="0" max="360" step="0.1" value="${row.dipDir}"></td>
+    <td><input type="color" value="${row.color}"></td>
+    <td><button class="ghost small" onclick="this.closest('tr').remove()">✕</button></td>
+  `;
+  tbody.appendChild(tr);
+}
+
+/* read table into data array */
+function readRows(){
+  const rows = [];
+  [...tbody.children].forEach(tr=>{
+    const [lab,dip,dd,col] = tr.querySelectorAll('input');
+    const d = parseFloat(dip.value), dir = parseFloat(dd.value);
+    if (isFinite(d) && isFinite(dir)) {
+      rows.push({ label: lab.value || 'Set', dip: d, dipDir: ((dir%360)+360)%360, color: col.value || '#ffffff' });
+    }
+  });
+  return rows;
+}
+
+/* =============== Three.js setup =============== */
+let scene, camera, renderer, controls, labelRenderer, wire;
+let poles=[], planes=[], poleGroup, planeGroup, clickables=[];
+let compass;
+
+const container = document.getElementById('webgl');
+init();
+buildSceneFromTable();
+
+function init(){
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0f172a);
+
+  const w = container.clientWidth || window.innerWidth-340;
+  const h = window.innerHeight;
+  camera = new THREE.PerspectiveCamera(50, w/h, 0.1, 2000);
+  camera.position.set(0, 0, RADIUS*3);
+
+  renderer = new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});
+  renderer.setSize(w,h);
+  container.appendChild(renderer.domElement);
+
+  labelRenderer = new THREE.CSS2DRenderer();
+  labelRenderer.setSize(w,h);
+  labelRenderer.domElement.style.position='absolute';
+  labelRenderer.domElement.style.top='0';
+  container.appendChild(labelRenderer.domElement);
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.06;
+  controls.minDistance = RADIUS*1.3;
+  controls.maxDistance = RADIUS*6;
+
+  // lights
+  scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  dir.position.set(200,200,200);
+  scene.add(dir);
+
+  // world axes helper
+  const axes = new THREE.AxesHelper(RADIUS*1.2); // X=E (red), Y=N (green), Z=Up (blue)
+  scene.add(axes);
+
+  // N/E/S/W CSS2D labels (world-anchored)
+  compass = new THREE.Group();
+  const mkLbl = (txt,pos) => {
+    const el = document.createElement('div');
+    el.className = 'label'; el.textContent = txt;
+    const obj = new THREE.CSS2DObject(el);
+    obj.position.copy(pos);
+    compass.add(obj);
+  };
+  mkLbl('N', new THREE.Vector3(0,  RADIUS*1.05, 0));
+  mkLbl('S', new THREE.Vector3(0, -RADIUS*1.05, 0));
+  mkLbl('E', new THREE.Vector3( RADIUS*1.05, 0, 0));
+  mkLbl('W', new THREE.Vector3(-RADIUS*1.05, 0, 0));
+  scene.add(compass);
+
+  // wireframe sphere (grid cue)
+  const sph = new THREE.SphereGeometry(RADIUS, 24, 18);
+  const mat = new THREE.MeshBasicMaterial({color:0x334155, wireframe:true, transparent:true, opacity:0.8});
+  wire = new THREE.Mesh(sph, mat);
+  scene.add(wire);
+
+  // groups
+  poleGroup = new THREE.Group();
+  planeGroup = new THREE.Group();
+  scene.add(planeGroup);
+  scene.add(poleGroup);
+
+  // events
+  window.addEventListener('resize', onResize);
+  renderer.domElement.addEventListener('pointerdown', onPick);
+
+  animate();
+}
+
+function onResize(){
+  const w = container.clientWidth || window.innerWidth-340;
+  const h = window.innerHeight;
+  camera.aspect = w/h; camera.updateProjectionMatrix();
+  renderer.setSize(w,h);
+  labelRenderer.setSize(w,h);
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+
+/* =============== Build scene from table =============== */
+function buildSceneFromTable(){
+  // clear old
+  poles.forEach(m=>poleGroup.remove(m));
+  planes.forEach(m=>planeGroup.remove(m));
+  poles=[]; planes=[]; clickables=[];
+  legendItems.innerHTML='';
+
+  const rows = readRows();
+  if(!rows.length) return;
+
+  rows.forEach((r,idx)=>{
+    const color = new THREE.Color(r.color);
+    // Pole vector from Dip/DipDir (x=E, y=N, z=Up; pole points downwards for lower hemisphere)
+    const v = poleVector(r.dipDir, r.dip).normalize().multiplyScalar(RADIUS);
+
+    // pole mesh
+    const pole = new THREE.Mesh(
+      new THREE.SphereGeometry(2.8, 16, 16),
+      new THREE.MeshStandardMaterial({color, roughness:0.3, metalness:0.1})
+    );
+    pole.position.copy(v);
+    pole.userData = {index:idx, label:r.label, dip:r.dip, dipDir:r.dipDir, color:r.color};
+    poleGroup.add(pole);
+    poles.push(pole);
+    clickables.push(pole);
+
+    // plane (thin disk) perpendicular to pole (passes through origin)
+    const plane = new THREE.Mesh(
+      new THREE.CylinderGeometry(RADIUS, RADIUS, 0.8, 96, 1, true),
+      new THREE.MeshBasicMaterial({color: color, transparent:true, opacity:0.18, side:THREE.DoubleSide})
+    );
+    // orient using quaternion: reference normal (0,0,1) -> pole direction
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1), v.clone().normalize());
+    plane.quaternion.copy(q);
+    planeGroup.add(plane);
+    planes.push(plane);
+
+    // legend
+    const item = document.createElement('div');
+    item.className='legend-item';
+    item.innerHTML = `<span class="swatch" style="background:${r.color}"></span>
+      <span>${r.label}</span>
+      <span class="muted small">— Dip ${r.dip.toFixed(1)}°, DipDir ${r.dipDir.toFixed(1)}°</span>`;
+    legendItems.appendChild(item);
+  });
+
+  // default: no selection -> all visible
+  clearHighlight();
+}
+
+/* DipDir/Dip -> pole unit vector (lower hemisphere) */
+function poleVector(dipDirDeg, dipDeg){
+  const trend = THREE.MathUtils.degToRad(dipDirDeg);
+  const plunge = THREE.MathUtils.degToRad(90 - dipDeg);
+  const x = Math.cos(plunge) * Math.sin(trend); // East
+  const y = Math.cos(plunge) * Math.cos(trend); // North
+  const z = -Math.sin(plunge);                  // Down for lower hemisphere
+  const v = new THREE.Vector3(x,y,z);
+  if (v.z>0) v.negate();
+  return v;
+}
+
+/* =============== Picking / highlight =============== */
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let selected = -1;
+
+function onPick(ev){
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(clickables, false);
+  if (hits.length){
+    const idx = hits[0].object.userData.index;
+    if (soloToggle.checked){
+      solo(idx);
+    } else {
+      highlight(idx);
+    }
+  } else {
+    // click empty space -> clear highlight / un-solo
+    clearHighlight(true);
+  }
+}
+
+function highlight(idx){
+  selected = idx;
+  planes.forEach((pl,i)=>{
+    pl.material.opacity = (i===idx)? 0.75 : 0.12;
+    pl.material.needsUpdate = true;
+  });
+  poles.forEach((po,i)=>{
+    po.scale.setScalar(i===idx? 1.3 : 1.0);
+  });
+}
+
+function clearHighlight(resetSolo=false){
+  selected = -1;
+  planes.forEach(pl=>{ pl.visible = true; pl.material.opacity = 0.18; });
+  poles.forEach(po=>{ po.visible = true; po.scale.setScalar(1.0); });
+  if (resetSolo) soloToggle.checked = false;
+}
+
+function solo(idx){
+  selected = idx;
+  planes.forEach((pl,i)=> pl.visible = (i===idx));
+  poles.forEach((po,i)=> po.visible = (i===idx));
+}
+
+/* =============== Utilities =============== */
+function resetView(){
+  controls.reset();
+  camera.position.set(0,0,RADIUS*3);
+  clearHighlight(true);
+}
+
+function downloadPNG(){
+  const link = document.createElement('a');
+  link.download = 'stereonet3D.png';
+  link.href = renderer.domElement.toDataURL('image/png');
+  link.click();
+}
+</script>
+</body>
+</html>
