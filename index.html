@@ -9,7 +9,7 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/renderers/CSS2DRenderer.js"></script>
   <style>
-    :root { --bg:#0f172a; --panel:#111827; --muted:#6b7280; --border:#1f2937; }
+    :root { --panel:#111827; --muted:#6b7280; --border:#1f2937; }
     html,body{height:100%;margin:0;background:#ffffff;color:#111;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial;}
     .wrap{display:grid;grid-template-columns:340px 1fr;height:100%;}
     .panel{background:var(--panel);color:#fff;padding:14px;border-right:1px solid var(--border);overflow:auto}
@@ -132,12 +132,12 @@ function readRows(){
 
 /* ------------------- Three.js setup ------------------- */
 let scene, camera, renderer, controls, labelRenderer, wire;
-let poles=[], planes=[], rings=[], poleGroup, planeGroup, clickables=[];
+let poles=[], planes=[], halos=[], poleGroup, planeGroup, clickables=[];
 let compass;
 
-const HIGHLIGHT_OPACITY = 0.95;  // selected plane
-const NORMAL_OPACITY    = 0.15;  // default planes
-const FADE_OPACITY      = 0.06;  // non-selected while highlighting
+const HIGHLIGHT_OPACITY = 0.95;  // halo opacity
+const NORMAL_OPACITY    = 0.35;  // ring opacity (default)
+const FADE_OPACITY      = 0.10;  // ring opacity (others when one selected)
 let selected = -1;
 
 const container = document.getElementById('webgl');
@@ -197,7 +197,7 @@ function init(){
 
   // wireframe sphere (grid cue) – light grey on white
   const sph = new THREE.SphereGeometry(RADIUS, 24, 18);
-  const wireMat = new THREE.MeshBasicMaterial({color:0xcbd5e1, wireframe:true, transparent:true, opacity:0.55});
+  const wireMat = new THREE.MeshBasicMaterial({color:0xcbd5e1, wireframe:true, transparent:true, opacity:0.4});
   wire = new THREE.Mesh(sph, wireMat);
   scene.add(wire);
 
@@ -234,8 +234,8 @@ function buildSceneFromTable(){
   // clear old
   poles.forEach(m=>poleGroup.remove(m));
   planes.forEach(m=>planeGroup.remove(m));
-  rings.forEach(m=>planeGroup.remove(m));
-  poles=[]; planes=[]; rings=[]; clickables=[];
+  halos.forEach(m=>planeGroup.remove(m));
+  poles=[]; planes=[]; halos=[]; clickables=[];
   legendItems.innerHTML='';
 
   const rows = readRows();
@@ -257,25 +257,27 @@ function buildSceneFromTable(){
     poles.push(pole);
     clickables.push(pole);
 
-    // plane (thin disk) perpendicular to pole (passes through origin)
-    const plane = new THREE.Mesh(
-      new THREE.CylinderGeometry(RADIUS, RADIUS, 0.8, 96, 1, true),
+    // orientation quaternion: reference normal (0,0,1) -> pole direction
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1), v.clone().normalize());
+
+    // GREAT-CIRCLE RING (the plane trace)
+    const ringThin = new THREE.Mesh(
+      new THREE.RingGeometry(RADIUS-0.3, RADIUS+0.3, 256),
       new THREE.MeshBasicMaterial({color: color, transparent:true, opacity:NORMAL_OPACITY, side:THREE.DoubleSide})
     );
-    // orient using quaternion: reference normal (0,0,1) -> pole direction
-    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,1), v.clone().normalize());
-    plane.quaternion.copy(q);
-    planeGroup.add(plane);
-    planes.push(plane);
+    ringThin.quaternion.copy(q);
+    planeGroup.add(ringThin);
+    planes.push(ringThin);
 
-    // outline ring (great circle) for highlight
-    const ringGeo = new THREE.RingGeometry(RADIUS-0.6, RADIUS+0.6, 128);
-    const ringMat = new THREE.MeshBasicMaterial({color: color, side: THREE.DoubleSide, transparent:true, opacity:0.9});
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.quaternion.copy(q);
-    ring.visible = false; // only on selection
-    planeGroup.add(ring);
-    rings.push(ring);
+    // HALO RING for highlight
+    const halo = new THREE.Mesh(
+      new THREE.RingGeometry(RADIUS-1.2, RADIUS+1.2, 256),
+      new THREE.MeshBasicMaterial({color: color, transparent:true, opacity:HIGHLIGHT_OPACITY, side:THREE.DoubleSide})
+    );
+    halo.quaternion.copy(q);
+    halo.visible = false;
+    planeGroup.add(halo);
+    halos.push(halo);
 
     // legend
     const item = document.createElement('div');
@@ -305,6 +307,7 @@ function poleVector(dipDirDeg, dipDeg){
 /* ------------------- Picking / highlight ------------------- */
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
+let selected = -1;
 
 function onPick(ev){
   const rect = renderer.domElement.getBoundingClientRect();
@@ -323,26 +326,26 @@ function onPick(ev){
 
 function highlight(idx){
   selected = idx;
-  planes.forEach((pl,i)=>{
-    pl.material.opacity = (i===idx)? HIGHLIGHT_OPACITY : FADE_OPACITY;
-    pl.material.needsUpdate = true;
+  planes.forEach((ring,i)=>{
+    ring.material.opacity = (i===idx)? NORMAL_OPACITY : FADE_OPACITY;
+    ring.material.needsUpdate = true;
   });
-  rings.forEach((ln,i)=> ln.visible = (i===idx)); // outline only on selected
+  halos.forEach((halo,i)=> halo.visible = (i===idx)); // halo only on selected
   poles.forEach((po,i)=> po.scale.setScalar(i===idx? 1.6 : 1.0));
 }
 
 function clearHighlight(resetSolo=false){
   selected = -1;
-  planes.forEach(pl=>{ pl.visible = true; pl.material.opacity = NORMAL_OPACITY; });
-  rings.forEach(ln=> ln.visible = false);
+  planes.forEach(ring=>{ ring.visible = true; ring.material.opacity = NORMAL_OPACITY; });
+  halos.forEach(h=> h.visible = false);
   poles.forEach(po=> po.scale.setScalar(1.0));
   if (resetSolo) soloToggle.checked = false;
 }
 
 function solo(idx){
   selected = idx;
-  planes.forEach((pl,i)=> pl.visible = (i===idx));
-  rings.forEach((ln,i)=> ln.visible = (i===idx));
+  planes.forEach((ring,i)=> ring.visible = (i===idx));
+  halos.forEach((halo,i)=> halo.visible = (i===idx));
   poles.forEach((po,i)=> po.visible = (i===idx));
 }
 
