@@ -32,6 +32,10 @@
     .legend-item{display:flex;align-items:center;gap:8px;margin:4px 0}
     .swatch{width:14px;height:14px;border-radius:3px;border:1px solid #0003}
     .small{font-size:12px}
+    /* let mouse/touch reach the WebGL canvas */
+    #webgl canvas { touch-action: none; }
+    /* make the CSS2D overlay ignore pointer events */
+    .label-layer { pointer-events: none; }
   </style>
 </head>
 <body>
@@ -153,6 +157,7 @@ function init(){
   labelRenderer.setSize(w,h);
   labelRenderer.domElement.style.position='absolute';
   labelRenderer.domElement.style.top='0';
+  labelRenderer.domElement.className = 'label-layer';   // ← add this line
   container.appendChild(labelRenderer.domElement);
 
   controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -347,3 +352,4 @@ function downloadPNG(){
 </script>
 </body>
 </html>
+
