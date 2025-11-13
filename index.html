@@ -233,11 +233,19 @@ function buildSceneFromTable(){
 
   clearHighlight();
 }
-function poleVector(dipDirDeg,dipDeg){
-  const trend=THREE.MathUtils.degToRad(dipDirDeg);
-  const plunge=THREE.MathUtils.degToRad(90-dipDeg);
-  const x=Math.cos(plunge)*Math.sin(trend), y=Math.cos(plunge)*Math.cos(trend), z=-Math.sin(plunge);
-  const v=new THREE.Vector3(x,y,z); if(v.z>0) v.negate(); return v;
+/* DipDir/Dip -> lower-hemisphere pole (plane normal) */
+function poleVector(dipDirDeg, dipDeg){
+  // Pole trend is 180° from dip direction (plane normal)
+  const trend  = THREE.MathUtils.degToRad((dipDirDeg + 180) % 360);
+  const plunge = THREE.MathUtils.degToRad(90 - dipDeg);   // pole plunge
+
+  const x = Math.cos(plunge) * Math.sin(trend);  // +X = East
+  const y = Math.cos(plunge) * Math.cos(trend);  // +Y = North
+  const z = -Math.sin(plunge);                   // lower hemisphere
+
+  const v = new THREE.Vector3(x, y, z);
+  if (v.z > 0) v.negate();                       // keep in lower hemisphere
+  return v;
 }
 
 /* ---------- Picking / highlight ---------- */
@@ -282,3 +290,4 @@ function downloadPNG(){ const a=document.createElement('a'); a.download='stereon
 </script>
 </body>
 </html>
+
